@@ -2,19 +2,17 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using Amazon;
+using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
-using Amazon.S3.Transfer;
 
 namespace AWSSync
 {
-	static class ProgramExtensions
+	internal static class ProgramExtensions
 	{
-		public static List<S3Object> ListAllObjects(this AmazonS3Client client, string bucketName, string prefix )
+		public static IEnumerable<S3Object> ListAllObjects(this AmazonS3Client client, string bucketName, string prefix )
 		{
 			var files = new List<S3Object>();
 
@@ -42,25 +40,25 @@ namespace AWSSync
 		}
 	}
 
-	class Program
+	internal static class Program
 	{
-		static void Main(string[] args)
+		private static void Main(string[] args)
 		{
-			if (args.Length != 7)
+			if (args.Length != 6)
 			{
-				Console.WriteLine("Args: <directory> <access key> <secret key> <region> <bucket> <prefix> <# of concurrent uploads>");
+				Console.WriteLine("Args: <directory> <profileName> <region> <bucket> <prefix> <# of concurrent uploads>");
 				return;
 			}
 
 			var directory = args[0];
-			var accesskey = args[1];
-			var secretkey = args[2];
-			var region = args[3];
-			var bucketName = args[4];
-			var prefix = args[5];
-			var maxConcurrentUploads = int.Parse(args[6]);
+			var profileName = args[1];
+			var region = args[2];
+			var bucketName = args[3];
+			var prefix = args[4];
+			var maxConcurrentUploads = int.Parse(args[5]);
+			var credentials = new StoredProfileAWSCredentials(profileName);
 
-			using (var client = new AmazonS3Client(accesskey, secretkey, RegionEndpoint.GetBySystemName(region)))
+			using (var client = new AmazonS3Client(credentials, RegionEndpoint.GetBySystemName(region)))
 			{
 				var s3files = client.ListAllObjects(bucketName, prefix);
 				var localfiles = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories);
@@ -87,6 +85,7 @@ namespace AWSSync
 
 				Console.WriteLine("Uploading {0} files", uploadRequests.Count);
 				Parallel.ForEach(uploadRequests, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrentUploads }, request => {
+					// ReSharper disable once AccessToDisposedClosure - Parallel.ForEach will run before client is disposed
 					client.PutObject(request);
 					Console.WriteLine("{0} uploaded.", request.Key);
 				});
@@ -98,7 +97,9 @@ namespace AWSSync
 		private static string RemoveFilePrefix(string file, string prefix)
 		{
 			if (!file.StartsWith(prefix) || file.Length <= prefix.Length)
+			{
 				throw new Exception();
+			}
 
 			var position = prefix.Length;
 			if (file[position] == '\\' || file[position] == '/')
